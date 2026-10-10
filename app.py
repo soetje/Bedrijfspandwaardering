@@ -5,8 +5,8 @@ from typing import Any
 
 import streamlit as st
 
-from reporting import euro, percent, report_pdf
-from valuation import calculate_valuation
+from reporting import TOTAL_COST_NOTE, euro, percent, price_range, report_pdf, spread_positions
+from valuation import NAR_RANGES, calculate_valuation, nar_range
 
 
 st.set_page_config(page_title="Bedrijfspand berekening", layout="wide")
@@ -18,17 +18,16 @@ with st.sidebar:
         "Koopprijs (€)", min_value=0, value=0, step=10000,
         help="Vul 0 in om de berekende waarde als aanschafprijs te gebruiken.",
     )
-    yield_rate_range = st.slider(
-        "Rendementseis voor waardering (%)", 3.0, 15.0, (7.0, 9.0), 0.25,
-        help="De laagste rendementseis geeft de hoogste waarde. Overige berekeningen gebruiken het midden van de range.",
+    property_type = st.selectbox(
+        "Type vastgoed", list(NAR_RANGES),
+        help="Bepaalt de indicatieve range voor het netto aanvangsrendement (NAR) waarmee de waarde wordt berekend.",
     )
-    yield_rate_range = (yield_rate_range[0] / 100, yield_rate_range[1] / 100)
+    yield_rate_range = nar_range(property_type)
     yield_rate = sum(yield_rate_range) / 2
+    st.caption(f"NAR-range {property_type.lower()}: {percent(yield_rate_range[0])} - {percent(yield_rate_range[1])}")
     area_m2 = st.number_input("Verhuurbaar oppervlak (m²)", min_value=1, value=800, step=25)
     rent_per_m2 = st.number_input("Markthuur per jaar per m² (€)", min_value=0.0, value=85.0, step=5.0)
     vacancy_rate = st.slider("Leegstand en oninbaar (%)", 0, 100, 5) / 100
-
-    value_growth_rate = st.slider("Verwachte waardestijging per jaar (%)", -10.0, 20.0, 2.0, 0.25) / 100
 
     st.markdown("#### Kosten en financiering")
     purchase_costs = st.number_input(
@@ -54,11 +53,12 @@ with st.sidebar:
         operating_cost_rate = st.slider("Exploitatiekosten (% van effectieve huur)", 0, 40, 15) / 100
         annual_operating_costs = None
 
-    loan_to_value = st.slider(
-        "Loan-to-value (%)", 0, 100, 65,
-        help="Berekend over de laagste van de koopprijs en indicatieve waarde; bij koopprijs 0 over de indicatieve waarde.",
-    ) / 100
-    if loan_to_value > 0:
+    use_financing = st.checkbox("Externe financiering meenemen", value=False)
+    if use_financing:
+        loan_to_value = st.slider(
+            "Loan-to-value (%)", 1, 100, 65,
+            help="Berekend over de laagste van de koopprijs en indicatieve waarde; bij koopprijs 0 over de indicatieve waarde.",
+        ) / 100
         financing_rate = st.slider("Financieringsrente (%)", 0.0, 12.0, 5.0, 0.25) / 100
         repayment_type_label = st.selectbox("Aflossingsvorm", ["Annuïtair", "Aflossingsvrij"])
         repayment_type = "annuity" if repayment_type_label == "Annuïtair" else "interest_only"
@@ -68,6 +68,7 @@ with st.sidebar:
             "Eenmalige financieringskosten (% van lening)", min_value=0.0, max_value=10.0, value=1.0, step=0.1
         ) / 100
     else:
+        loan_to_value = 0.0
         financing_rate = 0.0
         repayment_type_label = "Geen financiering"
         repayment_type = "interest_only"
@@ -94,7 +95,6 @@ calc_inputs = {
     "loan_to_value": loan_to_value,
     "transfer_tax_rate": transfer_tax_rate,
     "purchase_price": purchase_price,
-    "value_growth_rate": value_growth_rate,
     "annual_operating_costs": annual_operating_costs,
     "loan_fee_rate": loan_fee_rate,
     "repayment_type": repayment_type,
@@ -105,12 +105,11 @@ inputs: dict[str, Any] = {
     **calc_inputs,
     "detailed_operating_costs": detailed_operating_costs,
     "operating_cost_items": operating_cost_items,
+    "property_type": property_type,
     "repayment_type_label": repayment_type_label,
     "loan_term_label": loan_term_label,
 }
 
-inputs["acquisition_price"] = result["acquisition_price"]
-inputs["annual_operating_costs"] = result["annual_operating_costs"]
 report_date = date.today().strftime("%d-%m-%Y")
 pdf_data = report_pdf(object_name.strip() or "Bedrijfspand", report_date, inputs, result)
 filename = re.sub(r"[^A-Za-z0-9_-]+", "-", object_name.strip()).strip("-") or "bedrijfspand"
@@ -127,6 +126,77 @@ download_column.download_button(
     use_container_width=True,
 )
 
+MARKER_COLORS = {"central": "#167C72", "purchase": "#D98E04", "total": "#4C6EF5"}
+MARKER_CLASSES = {"central": "pr-diamond", "purchase": "pr-circle", "total": "pr-square"}
+MARKER_GLYPHS = {"central": "◆", "purchase": "●", "total": "■"}
+
+
+def render_price_range() -> None:
+    info = price_range(
+        low=result["value_range_low"],
+        central=result["value"],
+        high=result["value_range_high"],
+        purchase_price=purchase_price,
+        total_cost=result["total_cost"],
+    )
+
+    def pct(position: float) -> float:
+        return 6 + position * 88
+
+    band_left, band_right = pct(info["low_position"]), pct(info["high_position"])
+    top_pct = spread_positions([band_left, band_right], 16, 8, 92)
+    parts = [
+        '<div class="pr-line"></div>',
+        *(
+            f'<div class="pr-label" style="left:{x}%;top:0"><span class="pr-name">{caption}</span>'
+            f'<span class="pr-amount">{euro(value)}</span></div>'
+            for x, caption, value in zip(top_pct, ("Laag", "Hoog"), (info["low"], info["high"]))
+        ),
+    ]
+    parts.append(
+        f'<div class="pr-band" style="left:{band_left}%;width:max({band_right - band_left}%,6px)"></div>'
+    )
+    markers = info["markers"]
+    label_pct = spread_positions([pct(m["position"]) for m in markers], 20, 10, 90)
+    for marker, label_x in zip(markers, label_pct):
+        color = MARKER_COLORS[marker["key"]]
+        x = pct(marker["position"])
+        parts.append(
+            f'<div class="pr-marker {MARKER_CLASSES[marker["key"]]}" style="left:{x}%;background:{color}"></div>'
+        )
+        parts.append(
+            f'<div class="pr-label" style="left:{label_x}%;top:78px">'
+            f'<span class="pr-name" style="color:{color}">{MARKER_GLYPHS[marker["key"]]} {escape(marker["label"])}</span>'
+            f'<span class="pr-amount">{euro(marker["value"])}</span></div>'
+        )
+    st.markdown(
+        """
+        <style>
+        .pr-wrap { position: relative; height: 128px; margin: .2rem 0 .4rem; }
+        .pr-line { position: absolute; top: 51px; left: 3%; width: 94%; height: 2px;
+                   background: rgba(120, 140, 135, .35); }
+        .pr-band { position: absolute; top: 45px; height: 14px; border-radius: 3px;
+                   background: rgba(22, 124, 114, .35); border: 1px solid #167C72; box-sizing: border-box; }
+        .pr-marker { position: absolute; top: 52px; width: 12px; height: 12px;
+                     transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, .9);
+                     box-sizing: border-box; }
+        .pr-diamond { transform: translate(-50%, -50%) rotate(45deg); }
+        .pr-circle { border-radius: 50%; }
+        .pr-square { border-radius: 2px; }
+        .pr-label { position: absolute; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+        .pr-name { display: block; font-size: .72rem; color: #75817e; }
+        .pr-amount { display: block; font-size: .9rem; font-weight: 600; }
+        </style>
+        """
+        f'<div class="pr-wrap">{"".join(parts)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(f"{info['verdict']} {TOTAL_COST_NOTE}")
+
+
+st.markdown("#### Waardeband en positie")
+render_price_range()
+
 st.markdown("#### Kerncijfers")
 first_row = st.columns(2)
 first_row[0].metric(
@@ -139,10 +209,7 @@ second_row[0].metric("Eigen inbreng", euro(result["equity_required"]))
 second_row[1].metric("Kasstroom na rente en aflossing per jaar", euro(result["cash_flow_after_debt_service"]))
 
 st.markdown("#### Rendement")
-return_row = st.columns(3)
-return_row[0].metric("Rendement exclusief waardegroei", percent(result["yield_on_total_cost"]))
-return_row[1].metric("Rendement inclusief waardegroei", percent(result["yield_including_value_growth"]))
-return_row[2].metric("Kasstroomrendement op eigen inbreng", percent(result["cash_on_cash_return"]))
+st.metric("Rendement op totale investering", percent(result["yield_on_total_cost"]))
 
 st.divider()
 income_column, investment_column = st.columns(2, gap="large")
@@ -178,14 +245,10 @@ with income_column:
         ("Effectieve jaarhuur", euro(result["effective_rent"])),
         ("Exploitatiekosten / jaar", euro(result["annual_operating_costs"])),
         ("Netto bedrijfsresultaat (NOI)", euro(result["noi"])),
-        ("Rendementseis (range)", f"{percent(yield_rate_range[0])} - {percent(yield_rate_range[1])}"),
-        ("Centrale rendementseis", percent(yield_rate)),
+        ("NAR-range", f"{percent(yield_rate_range[0])} - {percent(yield_rate_range[1])}"),
+        ("Centrale NAR", percent(yield_rate)),
         ("Indicatieve waarde (range)", f"{euro(result['value_range_low'])} - {euro(result['value_range_high'])}"),
-        ("Verwachte waardestijging per jaar", percent(value_growth_rate)),
-        ("Grondslag waardestijging", euro(result["value_growth_basis"])),
-        ("Waardestijging per jaar", euro(result["annual_value_growth"])),
-        ("Rendement exclusief waardegroei", percent(result["yield_on_total_cost"])),
-        ("Rendement inclusief waardegroei", percent(result["yield_including_value_growth"])),
+        ("Rendement op totale investering", percent(result["yield_on_total_cost"])),
     ])
     if detailed_operating_costs:
         st.markdown("#### Uitsplitsing jaarlijkse exploitatiekosten")
@@ -213,13 +276,13 @@ with st.expander("Alle gebruikte uitgangspunten", expanded=False):
     with assumption_left:
         operating_cost_label = "Gespecificeerd per kostenpost" if detailed_operating_costs else percent(operating_cost_rate)
         render_detail_table([
+            ("Type vastgoed", property_type),
             ("Verhuurbaar oppervlak", f"{area_m2:,.0f} m²"),
             ("Markthuur per m² / jaar", euro(rent_per_m2)),
             ("Leegstand en oninbaar", percent(vacancy_rate)),
             ("Exploitatiekosten", operating_cost_label),
-            ("Rendementseis (range)", f"{percent(yield_rate_range[0])} - {percent(yield_rate_range[1])}"),
-            ("Centrale rendementseis", percent(yield_rate)),
-            ("Verwachte waardestijging", percent(value_growth_rate)),
+            ("NAR-range", f"{percent(yield_rate_range[0])} - {percent(yield_rate_range[1])}"),
+            ("Centrale NAR", percent(yield_rate)),
         ])
     with assumption_right:
         render_detail_table([
@@ -235,9 +298,10 @@ with st.expander("Alle gebruikte uitgangspunten", expanded=False):
         ])
 
 st.info(
-    "Deze berekening is indicatief. De ingevulde standaardwaarden zijn voorbeeld-aannames, "
-    "geen marktdata. Controleer de objectgegevens, fiscale grondslag en toepasselijke regels "
-    "voordat je resultaten voor een transactie gebruikt. Verwachte waardestijging is onzeker "
-    "en geen gegarandeerd rendement of kasstroom."
+    "Deze berekening is indicatief. De indicatieve waarde is de koopprijs; de kosten koper komen daar "
+    "nog bovenop. De NAR-range per type vastgoed en de overige standaardwaarden zijn voorbeeld-aannames, "
+    "geen gepubliceerde marktdata. Controleer de "
+    "objectgegevens, fiscale grondslag en toepasselijke regels voordat je resultaten voor een "
+    "transactie gebruikt."
 )
 

@@ -20,13 +20,13 @@ class ReportTests(unittest.TestCase):
             "loan_to_value": 0.65,
             "transfer_tax_rate": 0.104,
             "purchase_price": 0,
-            "value_growth_rate": 0.02,
             "annual_operating_costs": None,
             "loan_fee_rate": 0.01,
             "repayment_type": "annuity",
             "loan_term_years": 20,
             "detailed_operating_costs": False,
             "operating_cost_items": {},
+            "property_type": "Kantoor",
             "repayment_type_label": "Annuïtair",
             "loan_term_label": "20 jaar",
         }
@@ -35,7 +35,7 @@ class ReportTests(unittest.TestCase):
                 "area_m2", "rent_per_m2", "vacancy_rate", "operating_cost_rate",
                 "yield_rate", "yield_rate_range", "purchase_costs", "renovation_costs",
                 "financing_rate", "loan_to_value", "transfer_tax_rate", "purchase_price",
-                "value_growth_rate", "annual_operating_costs", "loan_fee_rate",
+                "annual_operating_costs", "loan_fee_rate",
                 "repayment_type", "loan_term_years",
             }}
         )
@@ -63,6 +63,20 @@ class ReportTests(unittest.TestCase):
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertLessEqual(len(re.findall(rb"/Type\s*/Page\b", pdf)), 2)
+
+    def test_report_with_purchase_price_stays_single_page(self) -> None:
+        self.inputs["purchase_price"] = 900_000
+        self.result = calculate_valuation(
+            area_m2=800, rent_per_m2=85, vacancy_rate=0.05, operating_cost_rate=0.15,
+            yield_rate=0.08, yield_rate_range=(0.07, 0.09), purchase_costs=25000,
+            renovation_costs=50000, financing_rate=0.05, loan_to_value=0.65,
+            purchase_price=900_000, loan_fee_rate=0.01, repayment_type="annuity",
+            loan_term_years=20,
+        )
+
+        pdf = self.create_pdf()
+
+        self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", pdf)), 1)
 
 
 if __name__ == "__main__":

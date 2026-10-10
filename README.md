@@ -26,9 +26,11 @@ python -m unittest discover -s tests -v
 
 ## Berekening
 
-De berekening gebruikt jaarlijkse bedragen. Percentages worden als decimalen in de formules gebruikt: 8% is bijvoorbeeld 0,08. De rendementseis heeft een onder- en bovengrens; het midden van die range is de centrale aanname voor alle overige uitkomsten.
+De berekening gebruikt jaarlijkse bedragen. Percentages worden als decimalen in de formules gebruikt: 8% is bijvoorbeeld 0,08. De waardering gebruikt uitsluitend het netto aanvangsrendement (NAR). De gebruiker kiest een type vastgoed (kantoor, winkel, bedrijfsruimte/logistiek of overig); daarbij hoort op de achtergrond een indicatieve NAR-range (zie `NAR_RANGES` in `valuation.py`). Het midden van die range is de centrale aanname voor alle overige uitkomsten. De ranges zijn eigen voorbeeld-aannames, geen gepubliceerde marktdata. Waardestijging van het onderliggende vastgoed maakt geen deel uit van het model.
 
 ### Huur en waarde
+
+Het NAR is gedefinieerd als de NOI gedeeld door de koopprijs plus kosten koper (overdrachtsbelasting en overige aankoopkosten). De indicatieve waarde is daarom de koopprijs **exclusief** kosten koper.
 
 | Uitkomst | Formule |
 | --- | --- |
@@ -37,12 +39,12 @@ De berekening gebruikt jaarlijkse bedragen. Percentages worden als decimalen in 
 | Exploitatiekosten, percentage | Effectieve jaarhuur × exploitatiekostenpercentage |
 | Exploitatiekosten, uitgesplitst | Som van onderhoud, verzekering, OZB/eigenaarslasten, beheer en overige kosten |
 | NOI (netto bedrijfsresultaat) | Effectieve jaarhuur − exploitatiekosten |
-| Centrale rendementseis | (Laagste rendementseis + hoogste rendementseis) ÷ 2 |
-| Centrale indicatieve waarde | max(NOI ÷ centrale rendementseis, 0) |
-| Lage waardegrens | max(NOI ÷ hoogste rendementseis, 0) |
-| Hoge waardegrens | max(NOI ÷ laagste rendementseis, 0) |
+| Centrale NAR | (Laagste NAR + hoogste NAR) ÷ 2 |
+| Centrale indicatieve waarde | max((NOI ÷ centrale NAR − overige aankoopkosten) ÷ (1 + overdrachtsbelastingtarief), 0) |
+| Lage waardegrens | Idem, met de hoogste NAR |
+| Hoge waardegrens | Idem, met de laagste NAR |
 
-De rendementseis is positief. Een hogere rendementseis geeft een lagere waarde. Als de NOI negatief is, worden de indicatieve waarde en beide grenzen op nul gezet.
+De NAR is positief. Een hogere NAR geeft een lagere waarde. Als de NOI negatief is, worden de indicatieve waarde en beide grenzen op nul gezet.
 
 ### Aankoop en belasting
 
@@ -51,8 +53,7 @@ De rendementseis is positief. Een hogere rendementseis geeft een lagere waarde. 
 | Aanschafprijs | Opgegeven koopprijs als die groter is dan nul; anders de centrale indicatieve waarde |
 | Grondslag overdrachtsbelasting | max(centrale indicatieve waarde, opgegeven koopprijs) |
 | Overdrachtsbelasting | Grondslag overdrachtsbelasting × ingevoerd tarief (standaard 10,4%) |
-| Initiële projectinvestering | Aanschafprijs + overige aankoopkosten + renovatie + overdrachtsbelasting |
-| Totale investering | Initiële projectinvestering + eenmalige financieringskosten |
+| Totale investering | Aanschafprijs + overige aankoopkosten + renovatie + overdrachtsbelasting + eenmalige financieringskosten |
 
 ### Financiering en kasstroom
 
@@ -68,23 +69,16 @@ De financieringsgrondslag is de laagste van de centrale indicatieve waarde en aa
 | Jaarlast, annuïtair | Lening × rente ÷ (1 − (1 + rente)<sup>−looptijd</sup>); bij 0% rente: lening ÷ looptijd |
 | Aflossing in jaar één | max(jaarlast − rentelasten, 0) |
 | Eigen inbreng | Totale investering − lening |
-| Kasstroom na rente | NOI − rentelasten |
 | Kasstroom na rente en aflossing | NOI − jaarlijkse rente- en aflossingslast |
-| Kasstroomrendement op eigen inbreng | Kasstroom na rente en aflossing ÷ eigen inbreng; 0 als eigen inbreng niet positief is |
 
 De annuïteit gebruikt jaarlijkse rente- en betaalperioden. De getoonde aflossing is die van het eerste jaar; bij annuïtair aflossen verandert de verhouding tussen rente en aflossing daarna.
 
-### Waardegroei en rendement
+### Rendement
 
 | Uitkomst | Formule |
 | --- | --- |
-| Grondslag waardestijging | Aanschafprijs |
-| Verwachte waardestijging per jaar | Grondslag waardestijging × ingevoerd waardestijgingspercentage |
-| Totaalrendement in euro's, inclusief waardegroei | NOI + verwachte waardestijging per jaar |
-| Rendement op totale investering, exclusief waardegroei | NOI ÷ totale investering |
-| Rendement op totale investering, inclusief waardegroei | (NOI + verwachte waardestijging per jaar) ÷ totale investering |
-| Kasstroomrendement op eigen inbreng | Kasstroom na rente en aflossing ÷ eigen inbreng; 0 als eigen inbreng niet positief is |
+| Rendement op totale investering | NOI ÷ totale investering |
 
-De twee rendementscijfers op totale investering gebruiken de **totale investering** als noemer. Het kasstroomrendement gebruikt de **eigen inbreng** als noemer. Waardegroei is een aanname, geen kasstroom of garantie. De aankoop-, belasting-, financierings- en rendementscijfers worden berekend met de centrale rendementseis, niet afzonderlijk met beide uiteinden van de range.
+Het rendement op totale investering gebruikt de **totale investering** als noemer. De aankoop-, belasting-, financierings- en rendementscijfers worden berekend met de centrale NAR, niet afzonderlijk met beide uiteinden van de range.
 
-Dit is een indicatief model, geen volledige taxatie of financieringsaanbieding. Controleer onder meer de fiscale grondslag, het toepasselijke overdrachtsbelastingtarief, btw-regels, huurcontracten, onderhoud en financieringsvoorwaarden. Niet ingevoerde kosten en belastingen worden niet automatisch meegenomen. De standaardwaarden zijn voorbeelden en geen marktdata.
+Dit is een indicatief model, geen volledige taxatie of financieringsaanbieding. Controleer onder meer de fiscale grondslag, het toepasselijke overdrachtsbelastingtarief, btw-regels, huurcontracten, onderhoud en financieringsvoorwaarden. Niet ingevoerde kosten en belastingen worden niet automatisch meegenomen. De NAR-ranges en overige standaardwaarden zijn voorbeelden en geen marktdata.
